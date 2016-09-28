@@ -1,140 +1,56 @@
-# Clearwater Docker
+# Clearwater Docker Compose file
 
-This repository contains [Dockerfiles](https://docs.docker.com/reference/builder/) for use with [Docker](https://www.docker.com/) and [Compose](https://docs.docker.com/compose/) to deploy [Project Clearwater](http://www.projectclearwater.org).
+Created a new docker compose file which will support affinity and anti-affinity policies for a set of 2 clearwater services.
 
-There are two options for installing Docker:
+##Affinity Policy
+We wanted the two clearwater services- ralf and sprout to run on the same node. So we had to set the environment parameter for ralf  to have "affinity==sprout" and vice a versa for sprout "affinity==ralf" 
 
-- using Docker Compose, which sets up appropriate connections between Docker containers. This is the recommended approach.
-- manually, if Docker Compose isn't available. In this case you need to use some Docker options to set up the networking config that Compose would set up automatically.
+    sprout:
+        image: 10.27.128.8/nfv/clearwaterdocker_sprout
+        networks:
+          default:
+            aliases:
+              - scscf.sprout
+              - icscf.sprout
+        ports:
+          - 22
+        environment:
+          - "affinity:container==~clearwater_ralf*"
 
-You should follow the "Common Preparation" section, then either the "Using Compose" or the "Manual Turn-Up" section.
 
-## Common Preparation
+    ralf:
+        image: 10.27.128.8/nfv/clearwaterdocker_ralf
+        ports:
+          - 22
+        environment:
+          - "affinity:container==~clearwater_sprout*"
 
-When using the `3.13.0-74-generic` kernel, we've seen [an issue](https://github.com/Metaswitch/clearwater-docker/issues/24) which causes Clearwater not to start properly. If you are using this kernel (`uname -r` will tell you), you should install a newer kernel (e.g. with `sudo apt-get install linux-image-3.13.0-87-generic`) and reboot.
 
-To prepare your system to deploy Clearwater on Docker, run:
 
-    # Install Docker (on Ubuntu).
-    wget -qO- https://get.docker.com/ | sh
+##Anti-Affinity Policy
+We wanted bono and ellis to run on two different nodes. So we had to set the environment key for bono to have "affinity!=ellis" and vice a versa for ellis "affinity!=bono" 
 
-    # Checkout clearwater-docker.
-    git clone --recursive git@github.com:Metaswitch/clearwater-docker.git
+     bono:
+        image: 10.27.128.8/nfv/clearwaterdocker_bono
+        ports:
+          - 22
+          - "5062:5062"
+        expose:
+          - "3478"
+          - "3478/udp"
+          - "5060"
+          - "5060/udp"
+        environment:
+          - "affinity:container!=~clearwater_ellis*"
+          
+    ellis:
+        image: 10.27.128.8/nfv/clearwaterdocker_ellis
+        ports:
+          - 22
+          - "80:80"
+        environment:
+          - "affinity:container!=~clearwater_bono*"
 
-## Using Compose
 
-There is a [Compose file](minimal-distributed.yaml) to instantiate a minimal (non-fault-tolerant) distributed Clearwater deployment under Docker.
-
-### Preparation
-
-To prepare your system to deploy Clearwater using Compose, after running the common preparation steps above, run:
-
-    # Install Docker Compose (on Ubuntu).
-    sudo apt-get install python-pip -y
-    sudo pip install -U docker-compose
-
-    # Build the base Clearwater docker image.
-    cd clearwater-docker
-    sudo docker build -t clearwater/base base
-
-### Starting Clearwater
-
-To start the Clearwater services, run:
-
-    # Build all the other Clearwater Docker images and start a deployment.
-    sudo docker-compose -f minimal-distributed.yaml up -d
-
-### Stopping Clearwater
-
-To stop the Clearwater services, run:
-
-    sudo docker-compose -f minimal-distributed.yaml stop
-
-## Manual Turn-Up
-
-If you can't or don't want to use Compose, you can turn the deployment up manually under Docker.
-
-### Preparation
-
-To prepare your system to deploy Clearwater without using Compose, after running the common preparation steps above, run:
-
-    # Build the Clearwater docker images.
-    cd clearwater-docker
-    for i in base bono ellis homer homestead ralf sprout ; do sudo docker build -t clearwater/$i $i ; done
-
-### Starting Clearwater
-
-To start the Clearwater services, run:
-
-    sudo docker network create --driver bridge clearwater_nw
-    sudo docker run -d --net=clearwater_nw --name etcd quay.io/coreos/etcd:v2.2.5 -name etcd0 -advertise-client-urls http://etcd:2379,http://etcd:4001 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls http://etcd:2380 -listen-peer-urls http://0.0.0.0:2380  -initial-cluster etcd0=http://etcd:2380 -initial-cluster-state new
-    sudo docker run -d --net=clearwater_nw --name homestead -p 22 clearwater/homestead
-    sudo docker run -d --net=clearwater_nw --name homer -p 22 clearwater/homer
-    sudo docker run -d --net=clearwater_nw --name ralf -p 22 clearwater/ralf
-    sudo docker run -d --net=clearwater_nw --name sprout -p 22 clearwater/sprout
-    sudo docker run -d --net=clearwater_nw --name bono -p 22 -p 3478:3478 -p 3478:3478/udp -p 5060:5060 -p 5060:5060/udp -p 5062:5062 clearwater/bono
-    sudo docker run -d --net=clearwater_nw --name ellis -p 22 -p 80:80 clearwater/ellis
-
-The Clearwater Docker images use DNS for service discovery - they require, for example, that the name "ellis" should resolve to the Ellis container's IP address. In standard Docker, user-defined networks include [an embedded DNS server](https://docs.docker.com/engine/userguide/networking/dockernetworks/#docker-embedded-dns-server) which guarantees this (and this is why we create the clearwater_nw network) - and this type of DNS server is relatively common (for example, [Kubernetes provides something similar](http://kubernetes.io/docs/user-guide/services/#dns)).
-
-### Stopping Clearwater
-
-To stop the Clearwater services, run:
-
-    sudo docker stop ellis
-    sudo docker stop bono
-    sudo docker stop sprout
-    sudo docker stop ralf
-    sudo docker stop homer
-    sudo docker stop homestead
-    
-### Restarting Clearwater
-
-To restart the Clearwater services, run:
-
-    sudo docker start ellis
-    sudo docker start bono
-    sudo docker start sprout
-    sudo docker start ralf
-    sudo docker start homer
-    sudo docker start homestead
-
-## Exposed Services
-
-The deployment exposes
-
--   the Ellis web UI on port 80 (exposed on port 8080) for self-provisioning - the signup key is "secret"
--   STUN/TURN on port 3478 for media relay
--   SIP on port 5060 for service
--   SIP/WebSocket on port 5062 for service.
-
-Additionally, each node exposes SSH - use `sudo docker ps` to see what port its exposed on.  The username/password is root/root.
-
-## What Next?
-
-Once you've turned up the deployment, you can test it by
-
--   [making a call](http://clearwater.readthedocs.org/en/latest/Making_your_first_call) - make sure you configure your SIP clients with a proxy, as if it were an All-in-One node
--   [running the live tests](http://clearwater.readthedocs.org/en/latest/Running_the_live_tests) - again, set the PROXY and ELLIS elements, as if it were an All-in-One node.
-
-## Cleaning Up
-
-If you wish to destroy your deployment either to redeploy with a different configuration or version or to free up resources on your docker host, the following may be useful commands:
-
-    # To rebuild an image (rather than pull it from the cache), add `--no-cache` or `--force-recreate` to the build commands
-    sudo docker build --no-cache -t clearwater/base base
-    sudo docker-compose -f minimal-distributed.yaml up --force-recreate
-    
-    # Remove all docker instances (not just Clearwater ones!)
-    sudo docker rm $(sudo docker ps -aq)
-
-    # Remove all the docker image files (not just Clearwater ones!)
-    sudo docker rmi $(sudo docker images -aq)
-
-    # Remove most of the docker image files, but not the Ubuntu 14.04 base
-    # image, use this if you intend to redeploy the clearwater deployment
-    # immediately to save time.
-    #
-    # This command will report an error due to a conflict, this can be safely
-    # ignored.
-    sudo docker rmi $(sudo docker images -a | tail -n +2 | grep -v "14.04" | tr -s ' ' | cut -f3 -d' ')
+####Note
+The image repository, "10.27.128.8/nfv" is the DTR repo that we have setup up locally and tagged it for each clearwater conatiner images(e.g clearwaterdocker_bono, clearwaterdocker_ellis etc)
